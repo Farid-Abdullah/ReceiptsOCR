@@ -1,13 +1,12 @@
 {
-  "name": "receipt-scanner-js-tests",
+  "name": "receipt-scanner-tests",
   "private": true,
   "scripts": {
-    "test": "node --test",
-    "e2e": "node e2e.js ../data/receipt_still.mjpeg 41.51 ok && node e2e.js ../data/receipt_still_bad.mjpeg 45.51 mismatch && node e2e.js ../data/receipt_still_tilted.mjpeg 41.51 ok"
+    "e2e": "node e2e.js"
   },
   "devDependencies": {
+    "jpeg-js": "^0.4.4",
     "onnxruntime-node": "1.22.0",
-    "playwright": "1.49.1",
-    "pngjs": "7.0.0"
+    "playwright": "1.49.1"
   }
 }

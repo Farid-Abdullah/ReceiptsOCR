@@ -1,134 +1,146 @@
-# Receipt scanner
+# Receipt Scanner
 
-A Streamlit app for your phone that reads a receipt step by step. Each step asks for one picture:
-the store name, the date and time, the total, the item count, and then (optionally) the items, a
-few lines per picture. After each picture the app outlines what it found and lists the candidates.
-You confirm one, retake the picture, type the value yourself, or skip the step. The summary
-shows everything as editable fields and an item table, and checks that the items add up to the
-total.
+A streamlit app for reading shop receipts with the camera. It extracts the store name, date, time,
+total, item count and the list of items (name, quantity, unit price, amount). It then checks that
+the items add up to the total.
 
-All OCR runs **in the phone's browser**. Python only receives the recognized text and does the
-receipt parsing and validation. Receipt images never leave the phone.
+It's a **[Streamlit](https://streamlit.io) application**. The camera and all of the text
+recognition run **on the phone, inside the browser**, as a custom Streamlit component written in
+plain JavaScript. The models are PaddleOCR PP-OCRv5, run with ONNX Runtime Web. Python only
+receives the recognized text and turns it into fields. So:
 
-## Deploy (Streamlit Community Cloud)
+* Speed depends on the phone, no server side logic.
+* Currently everything in the app is static and memoryless.
 
-The app is deployed from the `main` branch of the GitHub repo. Every push or merge to `main`
-redeploys it automatically; other branches are never deployed.
+**Try it on your phone: [receiptsocr.streamlit.app](https://receiptsocr.streamlit.app)**
 
-One-time setup on [share.streamlit.io](https://share.streamlit.io):
+## Two versions
 
-1. Sign in with GitHub and choose **Create app → Deploy a public app from GitHub**.
-2. Repository `Farid-Abdullah/ReceiptsOCR`, branch `main`, main file `app.py`.
-3. Under **Advanced settings**, choose Python **3.13** (3.11 or newer is required).
-4. Pick the app address (`something.streamlit.app`) and click **Deploy**.
+Both versions are in the app; switch between them at the top of the page. Each keeps its own
+progress. Scanner settings are in the ⚙️ side panel, which opens on the first visit.
 
-The first start downloads the OCR models (about 45 MB) into the app, which takes a minute.
-Streamlit Cloud provides the HTTPS that phones need for the camera.
+### Version 1: live scanning (default)
 
-## Run it on your PC (development)
+The first version needed no pictures: you slid the phone down the receipt and the camera read it
+continuously.
 
+* **Tracking:** frame-to-frame motion tracking and text matching placed every video frame on one
+  receipt, so text already seen was recognized again instead of being added twice.
+* **Voting:** each word was voted on across frames. Its box turned green once several frames
+  agreed, and stayed red while unsure.
+* **Live checks:** the items were checked against the total as you scanned. The products section
+  turned **orange** on the camera view when they didn't add up.
+
+It was the first approach. Scanning a moving receipt turned out slow and error-prone on a phone,
+which led to Version 2.
+
+### Version 2: guided photos
+
+Instead of scanning continuously, the app walks through the receipt one part at a time and asks for a picture of each. Steps:
+
+1. Store name
+2. Date and time
+3. Total
+4. Number of items
+5. Optionally the items, in several overlapping pictures
+
+After each picture, the text found is boxed on the photo: **blue** for the value it was looking
+for, **green** for words read clearly and **red** for unsure ones. You confirm a candidate, pick
+another, type the value yourself, retake the picture, or skip the step. The summary shows every
+field and item as editable values, and the checks (do the items add up to the total, does the
+item count match). Exporting to JSON is turned off while the results aren't reliable.
+
+## Status
+
+This was a failed experiment. I needed to reliably read and extract all the info from receipts seemlessly. The OCR itself reads printed receipt text
+well. Turning that text into fields is the hard part, and it is extremely unreliable on real fresh photos that might have blurrs, artifacts, wrinkled receipts etc. The parsing is also not good enough, there needs to be more business logic that validates the fields that are read, a way to deal with duplicate reads(in case of multiple photos per receipt).
+
+* Layouts differ a lot between shops, so items can be misread.
+
+The fields can always be corrected by hand in the app, but the whole point of this is finding a cheap way to scan receipt and extract all info accurately.
+
+## How to run
+
+### Run it locally (not recommended, try hosting, streamlit steps below)
+
+On first start the app downloads the OCR models (about 45 MB).
+
+* This might be useful only to check the UI, but then again its just a standard streamlit UI. 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m streamlit run serve.py
+.venv\Scripts\python -m pip install -r requirements.txt   # macOS/Linux: .venv/bin/python
+.venv\Scripts\python serve.py
 ```
 
-Open `http://localhost:8501` in a desktop browser with a webcam. Browsers treat `localhost` as
-secure, so the camera works without HTTPS there. The first start downloads the OCR models. To try
-a change on the phone, deploy it.
+Open `http://localhost:8501`; the app is served to this computer only.
 
-`serve.py` runs the same `app.py` but adds cross-origin isolation headers, which let the OCR use
-several CPU cores. Streamlit Cloud shows apps inside its own page, where that isolation isn't
-possible, so the deployed app runs the OCR on one core. That's slower, but it works.
 
-## Using it
+### Very easy to host on streamlit
 
-1. Tap **Start camera** (once; the app remembers it for the session).
-2. Each step says what to photograph at the top of the camera view. Fit that part of the receipt
-   in the frame, hold still and tap **Take picture**.
-3. The picture freezes. What the app found is outlined in **blue**. Other text is boxed **green**
-   when read clearly and **red** when unsure. Below the camera, pick the right candidate and tap
-   **Confirm**. You can also choose *Type it myself*, tap **Retake**, or **Skip** the step.
-4. For the items, photograph the list from the top down, a few lines per picture. Each picture
-   shows the items it found; tap **Add** to keep them. Overlapping pictures are fine: items already
-   added from the previous picture are skipped, and the app says how many. **Undo last** removes
-   the last batch.
-5. The summary lets you edit any field or item and shows whether the items add up to the total.
-   **Download JSON** exports the result; **Scan another receipt** starts over.
+Phone browsers only allow the camera on `https://` pages, so to use a phone the app has to be
+hosted. Streamlit Community Cloud does this for free:
 
-The sidebar (the `>` at the top left) has a few settings. *Detection resolution* trades small-print
-reading for speed. *Inference backend* lets you try WebGPU on recent phones. *Green box
-confidence* sets how strict "read clearly" is.
+1. Push the repo to GitHub.
+2. On [share.streamlit.io](https://share.streamlit.io), choose **Create app**: your repo, branch
+   `main`, main file `app.py`, and Python 3.13 under *Advanced settings*.
+3. Open the app's `https://….streamlit.app` address on the phone.
+
+Every push to `main` redeploys the app. If it behaves oddly after an update, use **⋮ → Reboot app**.
 
 ## How it works
 
 ```
 phone browser (scanner/frontend)                          Streamlit (Python)
 ┌──────────────────────────────────────────────────┐      ┌───────────────────────────────┐
-│ live camera ─► Take picture ─► worker.js:        │ text │ app.py: the steps             │
-│   PP-OCRv5 detector + English recognizer         ├─────►│ receipt_parser.py: find_vendor│
-│   (ONNX Runtime Web, WASM/WebGPU)                │      │  find_datetime, find_total,   │
-│ frozen picture with the found text outlined      │◄─────┤  find_item_count, find_items, │
-│                                                  │ ids  │  merge_items, summarize       │
+│ camera ─► picture / live ─► worker.js:           │ text │ views/: the two versions      │
+│   PP-OCRv5 text detector + English recognizer    ├─────►│ receipt_parser.py: finds the  │
+│   (ONNX Runtime Web, WASM or WebGPU)             │      │  store, date, time, total,    │
+│ the picture with what was found outlined         │◄─────┤  item count and items, and    │
+│                                                  │ ids  │  checks they add up           │
 └──────────────────────────────────────────────────┘      └───────────────────────────────┘
 ```
 
-* **OCR:** PaddleOCR PP-OCRv5 mobile models in ONNX form. The detector is DBNet; it finds the text
-  lines as rotated boxes, so a tilted receipt still reads. The recognizer is SVTR with CTC
-  decoding; it gives per-character confidence and word positions.
-* **Finding fields:** the text is grouped into printed rows (undoing any tilt). Each step has a
-  finder. The store name is the biggest line of words, ranked ahead of addresses and phone
-  numbers. Date and time come from patterns. The total is the row saying TOTAL, not SUBTOTAL; if
-  no row says it, every amount is offered. The item count comes from text like `ITEMS SOLD: 15`.
-  Items are rows with a price, including `qty @ price` lines.
-* **Overlapping item pictures:** the longest run of items at the end of the list that repeats at
-  the start of a new picture is skipped. Two genuinely identical items in different places on the
-  receipt, such as two `BANANAS` lines, are both kept.
-
-### Performance to expect
-
-Measured on this PC in headless Chromium, for a picture with about 50 lines of text:
-
-* About **3 s** per picture with `serve.py` locally (multi-threaded).
-* About **4.5 s** per picture the way Streamlit Cloud runs it (single core).
-
-Phones are slower; expect several seconds per picture. Pictures of a small area (just the total,
-just the store name) read faster than the whole receipt. If it feels slow, lower *Detection
-resolution* to 960 or try the WebGPU backend.
+* **OCR:** the PP-OCRv5 mobile text detector finds text lines as rotated boxes, so a tilted
+  receipt still reads. The English recognizer `en_PP-OCRv5_rec_mobile` gives per-character
+  confidence and word positions.
+* **Rows:** text pieces are grouped into printed rows by following each line's own slope, which
+  handles curved paper.
+* **Amounts:** decimals, whole numbers with a currency (`66 QR`), rows of numbers that agree
+  (`1 8 8`), thousands separators, and prices whose decimal point the OCR dropped (`4 00`).
+* **Items:** the parser handles three layouts: the name on the same row as the price, the name on
+  the row above, and barcode-first receipts with the name below the price row.
+* **Total:** every amount is scored by its label and by whether the receipt confirms it. Words
+  like TOTAL, NET AMOUNT or AMOUNT DUE count for it; cash, change, points, rounding and savings
+  count against it. A value printed more than once, or equal to subtotal + adjustments or to
+  cash − change, also counts for it.
 
 ## Project layout
 
 | Path | |
 |---|---|
-| `serve.py` | ASGI entry (Streamlit `st.App`) that adds the isolation headers |
-| `app.py` | the Streamlit page: the scan steps, the summary, export |
-| `receipt_parser.py` | the finders for each step, item merging and the validation checks |
-| `scanner/` | the camera component (`frontend/` is plain JS, no build step) |
-| `scanner/assets.py` | downloads the models and onnxruntime-web on first start, with checksums |
+| `app.py` | entry point: settings sidebar, version switch |
+| `views/guided.py`, `views/live.py` | Version 2 (guided photos) and Version 1 (live scan) |
+| `serve.py` | local run (`python serve.py`): this computer only, with multi-threaded OCR |
+| `receipt_parser.py` | the finder for each step, merging overlapping item pictures, the checks |
+| `scanner/` | the camera component (`frontend/` is plain JavaScript, no build step; `frontend/live/` is Version 1) |
+| `scanner/assets.py` | downloads the models and ONNX Runtime Web on first start, with checksums |
+| `tests/` | parser tests on common receipt layouts; `js/` has an OCR command-line tool and an end-to-end test |
 
 ## Tests
 
 ```powershell
 .venv\Scripts\python -m pip install -r requirements-dev.txt
-.venv\Scripts\python tests\make_receipt.py --video     # synthetic receipt images and fake camera feeds
-.venv\Scripts\python -m pytest tests                    # parser and step finders
+.venv\Scripts\python -m pytest tests          # parser tests on common receipt layouts
 
-cd tests\js
-npm install
-npm test                                                 # OCR core with the real models (Node)
-npx playwright install chromium
-npm run e2e                                              # whole guided scan with a fake camera (app must be running)
+cd tests\js; npm install; npx playwright install chromium
+node ocr_cli.js photo.jpg                     # what the app's OCR reads from a photo (JSON)
+node e2e.js photo.jpg                         # both versions in Chromium, the photo as the camera
 ```
 
-The end-to-end test takes a picture at every step and confirms what was found. It adds the items
-twice from completely overlapping pictures, checking that nothing is added twice, and then checks
-the summary. It runs for a correct receipt, one whose total doesn't match, and a tilted receipt.
+The end-to-end test needs the app running (`python serve.py`). No receipt photos are included;
+use your own.
 
-## Notes and limits
+## Notes
 
-* English only. Arabic or other scripts show up as red boxes and are ignored by the parser.
-* The parser uses heuristics tuned to common receipt layouts: `qty @ price`, `QTY n`, codes before
-  the name, tax flags after prices, and discount lines. Unusual layouts may need a tweak in
-  `receipt_parser.py`.
-* When running locally, restart `streamlit run serve.py` after editing `receipt_parser.py`. In ASGI mode, Streamlit only reloads
-  `app.py` by itself.
+* English text only. Arabic shows up as red boxes and is ignored.
+* Numeric dates are read day-first (18/10/2026), as printed in Qatar.

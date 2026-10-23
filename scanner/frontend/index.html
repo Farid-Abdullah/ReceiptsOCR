@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Receipt scanner</title>
   <style>
-    :root { --ok: #22c55e; --bad: #ef4444; --found: #3b82f6; --fg: #f8fafc; --muted: #94a3b8; }
+    :root { --ok: #22c55e; --bad: #ef4444; --warn: #f97316; --found: #3b82f6; --fg: #f8fafc; --muted: #94a3b8; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     #stage { position: relative; width: 100%; background: #000; border-radius: 12px; overflow: hidden; touch-action: manipulation; }
@@ -19,6 +19,8 @@
     #banner:empty { display: none; }
     #hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(15, 23, 42, .8); color: var(--fg); font-size: 13px; white-space: nowrap; pointer-events: none; }
     #hint:empty { display: none; }
+    #hud { position: absolute; top: 6px; right: 6px; padding: 3px 8px; border-radius: 6px; background: rgba(15, 23, 42, .7); color: var(--muted); font: 10px ui-monospace, Menlo, Consolas, monospace; pointer-events: none; }
+    #hud:empty { display: none; }
     #bar { display: flex; gap: 8px; margin-top: 8px; }
     button { flex: 1 1 0; min-height: 48px; border: 0; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; background: #1e293b; color: var(--fg); }
     button.primary { background: #2563eb; flex-grow: 2; }
@@ -27,11 +29,14 @@
     #start-big { flex: none; padding: 0 28px; background: #2563eb; }
     #legend { display: flex; gap: 14px; padding: 6px 0 2px; font-size: 12px; color: #64748b; flex-wrap: wrap; }
     #legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-    #legend .g { color: var(--ok); } #legend .r { color: var(--bad); } #legend .b { color: var(--found); }
+    #legend .g { color: var(--ok); } #legend .r { color: var(--bad); } #legend .o { color: var(--warn); } #legend .b { color: var(--found); }
   </style>
 </head>
 <body>
-  <div id="app">
+  <div id="app"></div>
+
+  <!-- Version 2: guided photos (main.js) -->
+  <template id="guided">
     <div id="stage">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="overlay"></canvas>
@@ -48,19 +53,60 @@
       <button id="torch" hidden>Light</button>
     </div>
     <div id="legend"><span class="b">found</span><span class="g">read clearly</span><span class="r">unsure</span></div>
-  </div>
+  </template>
+
+  <!-- Version 1: live scan (live/*.js) -->
+  <template id="live">
+    <div id="stage">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+      <div id="placeholder">
+        <button id="start-big">Start camera</button>
+        <p id="status">Loading OCR models...</p>
+      </div>
+      <div id="hud"></div>
+      <div id="hint"></div>
+    </div>
+    <div id="bar">
+      <button id="pause" disabled>Pause</button>
+      <button id="torch" hidden>Light</button>
+      <button id="reset">New receipt</button>
+    </div>
+    <div id="legend"><span class="g">confirmed</span><span class="r">uncertain</span><span class="o">items don't add up</span></div>
+  </template>
+
   <script>
-    // Load the app script tagged with the code fingerprint from build.json (written by the Python
-    // side), so phones fetch new code after a redeploy instead of a cached copy.
+    // Which version to start comes with Streamlit's first render ("mode" argument), so ask for it,
+    // keep that render for the version's script to replay, then load the script tagged with the code
+    // fingerprint from build.json (written by the Python side) so phones never run cached old code.
     (async () => {
+      const firstRender = new Promise((resolve) => {
+        window.addEventListener("message", function first(e) {
+          if (e.data && e.data.type === "streamlit:render") {
+            window.removeEventListener("message", first);
+            resolve(e.data);
+          }
+        });
+      });
+      window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
       let v = String(Date.now());
       try {
         v = (await (await fetch("build.json", { cache: "no-store" })).json()).v || v;
       } catch (_) { /* no fingerprint: the timestamp still avoids stale code */ }
       window.SCANNER_VERSION = v;
-      const s = document.createElement("script");
-      s.src = `main.js?v=${v}`;
-      document.body.appendChild(s);
+      window.__firstRender = await firstRender;
+      const live = (window.__firstRender.args || {}).mode === "live";
+      document.getElementById("app").appendChild(document.getElementById(live ? "live" : "guided").content.cloneNode(true));
+      const scripts = live ? ["live/tracker.js", "live/motion.js", "live/main.js"] : ["main.js"];
+      for (const src of scripts) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = `${src}?v=${v}`;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      }
     })();
   </script>
 </body>

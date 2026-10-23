@@ -48,7 +48,7 @@ self.onmessage = async (e) => {
       Object.assign(opts, msg.options);
     } else if (msg.type === "frame") {
       const img = { data: new Uint8ClampedArray(msg.buffer), width: msg.width, height: msg.height };
-      const res = await OCRCore.runOCR(ort, sessions, chars, img, opts);
+      const res = await OCRCore.runOCR(ort, sessions, chars, img, { ...opts, hints: msg.hints });
       postMessage({ type: "result", id: msg.id, lines: res.lines, timing: res.timing, buffer: msg.buffer }, [msg.buffer]);
     }
   } catch (err) {

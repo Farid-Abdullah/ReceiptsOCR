@@ -8,8 +8,6 @@ scanner/frontend/models/
 scanner/frontend/vendor/
 scanner/frontend/build.json
 
-# test tooling and generated test data (python tests/make_receipt.py --video)
+# test tooling and test output (OCR cache, screenshots)
 tests/js/node_modules/
-tests/data/*.mjpeg
-tests/data/*.png
-tests/data/e2e/
+tests/output/

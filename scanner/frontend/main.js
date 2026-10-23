@@ -1,4 +1,4 @@
-// Camera with a "Take picture" button. The photo is read by the OCR worker, its text lines go to
+// Version 2 (guided photos): camera with a "Take picture" button. The photo is read by the OCR worker, its text lines go to
 // Streamlit, and Streamlit sends back which lines to outline as "found". Plus the Streamlit bridge.
 (function () {
   "use strict";
@@ -94,13 +94,29 @@
     }
   }
 
-  function stopCamera() {
+  // Turn the light off before letting go of the camera: some Android phones keep the torch on
+  // otherwise, even after scanning has finished.
+  async function stopCamera() {
     if (!stream) return;
-    stream.getTracks().forEach((t) => t.stop());
+    const s = stream, t = track;
     stream = null;
     track = null;
+    if (torchOn && t) {
+      try { await t.applyConstraints({ advanced: [{ torch: false }] }); } catch (_) { /* no torch control */ }
+    }
     torchOn = false;
+    els.torch.textContent = "Light";
+    s.getTracks().forEach((x) => x.stop());
     els.video.srcObject = null;
+    updateUi();
+  }
+
+  // Leaving the page (switching versions, closing the tab): release the camera right away.
+  function stopNow() {
+    if (!stream) return;
+    stream.getTracks().forEach((x) => x.stop());
+    stream = null;
+    track = null;
   }
 
   function cameraWasAllowed() {
@@ -267,7 +283,8 @@
 
   // the iframe's own height would feed back into documentElement.scrollHeight, so measure the content
   function contentHeight() {
-    return Math.ceil(document.getElementById("app").getBoundingClientRect().height);
+    const app = document.getElementById("app");
+    return app.hidden ? 0 : Math.ceil(app.getBoundingClientRect().height);
   }
 
   // ---- Streamlit render events -----------------------------------------------------------------
@@ -291,13 +308,23 @@
     } else if (photo && photo.acked && !args.review) {
       toCamera(); // Streamlit is done with this photo (confirmed or cleared)
     }
-    if (step.capture && !stream && cameraWasAllowed()) startCamera();
+    if (step.capture && !stream && cameraWasAllowed() && !document.hidden) startCamera();
     if (!step.capture) stopCamera();
+    const hidden = step.show === false;
+    if (document.getElementById("app").hidden !== hidden) {
+      document.getElementById("app").hidden = hidden;
+      Streamlit.setFrameHeight(hidden ? 0 : contentHeight());
+    }
     updateUi();
   }
 
   window.addEventListener("message", (e) => {
     if (e.data && e.data.type === "streamlit:render") onRender(e.data.args || {});
+  });
+  window.addEventListener("pagehide", stopNow);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopCamera();
+    else if (step.capture && cameraWasAllowed()) startCamera();
   });
   els.startBig.addEventListener("click", startCamera);
   els.shoot.addEventListener("click", takePicture);
@@ -312,8 +339,10 @@
   new ResizeObserver(() => Streamlit.setFrameHeight(contentHeight())).observe(document.getElementById("app"));
 
   // read-only handle for debugging and the end-to-end test
-  window.__scanner = { get mode() { return mode; }, get photo() { return photo; }, get review() { return review; }, get step() { return step; } };
+  window.__scanner = { get mode() { return mode; }, get photo() { return photo; }, get review() { return review; }, get step() { return step; }, get cameraOn() { return !!stream; } };
   Streamlit.ready();
+  // the loader (index.html) already received Streamlit's first render, which chose this version
+  if (window.__firstRender) onRender(window.__firstRender.args || {});
   layout();
   updateUi();
 })();
