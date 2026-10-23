@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# downloaded by scripts/setup_assets.py
+scanner/frontend/models/
+scanner/frontend/vendor/
+
+# test tooling and generated test data (python tests/make_receipt.py --video); Hugging Face
+# also rejects binary files such as PNGs in git history
+tests/js/node_modules/
+tests/data/*.mjpeg
+tests/data/*.png
+tests/data/e2e/
