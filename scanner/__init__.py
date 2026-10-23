@@ -30,9 +30,11 @@ def _write_build_version() -> None:
 _write_build_version()
 
 
-def receipt_scanner(*, settings: dict, analysis: dict | None, reset_nonce: int, key: str):
-    """Render the scanner. Returns {"session", "version", "lines": [...], "stats"} or None."""
-    return _component(settings=settings, analysis=analysis, reset_nonce=reset_nonce, key=key, default=None)
+def receipt_scanner(*, settings: dict, step: dict, review: dict | None, key: str):
+    """Render the camera for one step ({"id", "title", "prompt", "capture"}). `review` outlines what was
+    found in the current picture ({"seq", "ids", "label"}). Returns the last camera event:
+    {"event": "photo", "seq", "step", "size", "lines": [...]} or {"event": "retake", "seq", "step"}."""
+    return _component(settings=settings, step=step, review=review, key=key, default=None)
 
 
 def assets_present() -> bool:

@@ -1,15 +1,19 @@
-"""Turn the scanner's de-duplicated text lines into structured receipt fields and validate them.
+"""Turn OCR text lines from receipt photos into structured fields and validate them.
 
-Input is what the camera component sends: a list of text segments, each with an id, the
-consensus text, a confidence flag and a box in receipt ("document") coordinates.  The parser
-is stateless - it re-parses the whole document every time, which keeps it robust to the
-scanner revising earlier readings.
+Input is what the camera component sends for one photo: a list of text segments, each with an
+id, the text, a confidence flag, a box in photo pixels and the text angle.
+
+The guided scan photographs one area at a time, so there is a finder per step (find_vendor,
+find_datetime, find_total, find_item_count, find_items) that returns candidates for the user to
+confirm, plus merge_items for overlapping item photos and summarize for the final checks.
+parse() reads a whole receipt in one go.
 """
 from __future__ import annotations
 
 import math
 import re
 from dataclasses import dataclass, field, asdict
+from difflib import SequenceMatcher
 
 MONEY_TOL = 0.011
 
@@ -239,13 +243,22 @@ def _qty_info(text: str) -> tuple[float, float, str] | None:
     return None
 
 
-def parse(lines: list[dict]) -> dict:
-    lines = [l for l in lines if str(l.get("text", "")).strip()]
+def _rows(lines: list[dict]) -> list[Row]:
+    # 1-2 character readings with low confidence are slivers of bigger letters, not text
+    lines = [
+        l for l in lines
+        if str(l.get("text", "")).strip()
+        and not (len(str(l["text"]).strip()) <= 2 and float(l.get("conf", 1.0)) < 0.5)
+    ]
     segments = [
         Segment(str(l["id"]), str(l["text"]).strip(), bool(l.get("ok", False)), *map(float, l["box"])) for l in lines
     ]
     _deskew(segments, [float(l.get("angle", 0.0)) for l in lines])
-    rows = group_rows(segments)
+    return group_rows(segments)
+
+
+def parse(lines: list[dict]) -> dict:
+    rows = _rows(lines)
 
     roles: dict[str, str] = {}
     result: dict = {
@@ -441,3 +454,105 @@ def validate(r: dict) -> dict:
     check("Items add up to total", {"ok": True, "mismatch": False}.get(status), message)
     return {"status": status, "message": message, "items_sum": items_sum, "checks": checks,
             "line_count": line_count, "unit_count": unit_count}
+
+
+# --- guided scan: one finder per step -------------------------------------------------------------
+# Each returns candidates [{"value", "label", "ids"}], best first; "ids" are the segments to outline.
+
+
+def _candidate(value, row: Row, ids: list[str] | None = None) -> dict:
+    return {"value": value, "label": row.text, "ids": ids or row.ids}
+
+
+def find_vendor(lines: list[dict], limit: int = 3) -> list[dict]:
+    """The store name: the largest line of words; addresses, phone numbers and prices rank last."""
+    ranked = []
+    for row in _rows(lines):
+        text = row.text
+        if _letters(text) < 3 or _find_date(text) or _find_time(text) or row_amount(text)[0] is not None:
+            continue
+        if sum(c.isdigit() for c in text) > _letters(text):
+            continue
+        ranked.append((bool(HEADER_NOISE_RE.search(row.upper)), -row.height, row))
+    ranked.sort(key=lambda r: (r[0], r[1]))
+    return [_candidate(row.text, row) for _, _, row in ranked[:limit]]
+
+
+def find_datetime(lines: list[dict]) -> dict:
+    """{"date": [...], "time": [...]}; ids point at the segments holding each match."""
+    found: dict = {"date": [], "time": []}
+    for row in _rows(lines):
+        for key, finder in (("date", _find_date), ("time", _find_time)):
+            value = finder(row.text)
+            if value and value not in [c["value"] for c in found[key]]:
+                ids = [s.id for s in row.segments if finder(s.text)] or row.ids
+                found[key].append(_candidate(value, row, ids))
+    return found
+
+
+def find_total(lines: list[dict]) -> dict:
+    """{"total": [...], "subtotal": float|None, "tax": float|None}. Rows saying TOTAL come first;
+    if none does, every amount in the photo is offered, largest first."""
+    keyword, amounts = [], []
+    subtotal = tax = None
+    for row in _rows(lines):
+        up = row.upper
+        amount, _ = row_amount(row.text)
+        if amount is None:
+            continue
+        if SUBTOTAL_RE.search(up):
+            subtotal = amount if subtotal is None else subtotal
+        elif TOTAL_RE.search(up) and not NOT_TOTAL_RE.search(up) and not PAYMENT_RE.search(up) and amount > 0:
+            exact = TOTAL_RE.search(up).group(1).replace(" ", "") == "TOTAL"
+            keyword.append((0 if exact else -1, -amount, _candidate(amount, row)))
+        elif TAX_RE.search(up) and not HEADER_NOISE_RE.search(up):
+            tax = round((tax or 0) + amount, 2)
+        if amount > 0:
+            amounts.append((-amount, _candidate(amount, row)))
+    if keyword:
+        totals = [c for *_, c in sorted(keyword, key=lambda k: (k[0], k[1]))]
+    else:
+        totals = [c for _, c in sorted(amounts, key=lambda a: a[0])]
+    return {"total": totals, "subtotal": subtotal, "tax": tax}
+
+
+def find_item_count(lines: list[dict]) -> list[dict]:
+    found = []
+    for row in _rows(lines):
+        for pat in COUNT_RES:
+            m = pat.search(row.upper)
+            if m and int(m.group(1)) not in [c["value"] for c in found]:
+                found.append(_candidate(int(m.group(1)), row))
+                break
+    return found
+
+
+def find_items(lines: list[dict]) -> dict:
+    """Items in one photo of the item list, plus subtotal/tax/total if the photo reached them."""
+    r = parse(lines)
+    return {"items": r["items"], "subtotal": r["subtotal"], "tax": r["tax"], "total": r["total"]}
+
+
+def _same_item(a: dict, b: dict) -> bool:
+    if abs(a["total"] - b["total"]) > MONEY_TOL:
+        return False
+    return SequenceMatcher(None, a["name"].upper(), b["name"].upper()).ratio() >= 0.75
+
+
+def merge_items(existing: list[dict], new: list[dict]) -> tuple[list[dict], int]:
+    """Append a new photo's items. Consecutive photos may overlap: the longest run at the end of the
+    list that repeats at the start of the new photo is skipped. Returns (merged, skipped)."""
+    for k in range(min(len(existing), len(new)), 0, -1):
+        if all(_same_item(existing[len(existing) - k + i], new[i]) for i in range(k)):
+            return existing + new[k:], k
+    return existing + new, 0
+
+
+def summarize(fields: dict, items: list[dict]) -> dict:
+    """Final checks over the confirmed fields and items (same checks as validate())."""
+    r = {
+        "vendor": fields.get("vendor"), "date": fields.get("date"), "time": fields.get("time"),
+        "total": fields.get("total"), "subtotal": fields.get("subtotal"), "tax": fields.get("tax"),
+        "stated_item_count": fields.get("item_count"), "items": items,
+    }
+    return validate(r)

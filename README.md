@@ -1,13 +1,13 @@
 # Receipt scanner
 
-A Streamlit app for your phone: point the camera at a receipt and slide slowly from top to bottom.
-Text is read live, without taking photos. Each word gets a box: **green** once several frames
-agree on it, **red** while it is uncertain. Text already read is recognised again rather than
-duplicated. The app pulls out the vendor, date, time, items (code, quantity, unit price, line
-total), the printed item count and the total. When the items don't add up to the total, the whole
-products section turns **orange** on the camera view.
+A Streamlit app for your phone that reads a receipt step by step. Each step asks for one picture:
+the store name, the date and time, the total, the item count, and then (optionally) the items, a
+few lines per picture. After each picture the app outlines what it found and lists the candidates.
+You confirm one, retake the picture, type the value yourself, or skip the step. The summary
+shows everything as editable fields and an item table, and checks that the items add up to the
+total.
 
-All OCR runs **in the phone's browser**. Python only receives the de-duplicated text and does the
+All OCR runs **in the phone's browser**. Python only receives the recognized text and does the
 receipt parsing and validation. Receipt images never leave the phone.
 
 ## Deploy (Streamlit Community Cloud)
@@ -43,65 +43,66 @@ possible, so the deployed app runs the OCR on one core. That's slower, but it wo
 
 ## Using it
 
-1. Tap **Start camera** and let the receipt's width fill the view.
-2. Move slowly downwards. Each frame must overlap the previous one, because that overlap is how
-   the app knows where it is on the receipt.
-3. **Hold steady** means the picture is too blurry to read. **Lost track** means it can't place
-   the view on the receipt; move back over text it has already read.
-4. When the total has been read, the items are checked against it. If they don't match, the
-   products section turns orange and the results list which check failed. Rescan the red words or
-   the orange area.
-5. Tap **New receipt** to start over. **Download JSON** exports the result.
+1. Tap **Start camera** (once; the app remembers it for the session).
+2. Each step says what to photograph at the top of the camera view. Fit that part of the receipt
+   in the frame, hold still and tap **Take picture**.
+3. The picture freezes. What the app found is outlined in **blue**. Other text is boxed **green**
+   when read clearly and **red** when unsure. Below the camera, pick the right candidate and tap
+   **Confirm**. You can also choose *Type it myself*, tap **Retake**, or **Skip** the step.
+4. For the items, photograph the list from the top down, a few lines per picture. Each picture
+   shows the items it found; tap **Add** to keep them. Overlapping pictures are fine: items already
+   added from the previous picture are skipped, and the app says how many. **Undo last** removes
+   the last batch.
+5. The summary lets you edit any field or item and shows whether the items add up to the total.
+   **Download JSON** exports the result; **Scan another receipt** starts over.
 
 The sidebar (the `>` at the top left) has a few settings. *Detection resolution* trades small-print
 reading for speed. *Inference backend* lets you try WebGPU on recent phones. *Green box
-confidence* and *Frames that must agree* set how strict "green" is.
+confidence* sets how strict "read clearly" is.
 
 ## How it works
 
 ```
-phone browser (scanner/frontend)                                PC (Python)
-┌────────────────────────────────────────────────────────┐      ┌──────────────────────┐
-│ camera ─► motion.js (frame-to-frame shift, 30 fps)     │      │ app.py               │
-│        └► worker.js: PP-OCRv5 detector + English       │ text │ receipt_parser.py    │
-│           recognizer (ONNX Runtime Web, WASM/WebGPU)   ├─────►│  rows, fields,       │
-│        ─► tracker.js: place each frame on the receipt, │      │  items, validation   │
-│           merge repeat sightings, vote on the text     │◄─────┤                      │
-│        ─► overlay: green / red / orange boxes          │roles │                      │
-└────────────────────────────────────────────────────────┘      └──────────────────────┘
+phone browser (scanner/frontend)                          Streamlit (Python)
+┌──────────────────────────────────────────────────┐      ┌───────────────────────────────┐
+│ live camera ─► Take picture ─► worker.js:        │ text │ app.py: the steps             │
+│   PP-OCRv5 detector + English recognizer         ├─────►│ receipt_parser.py: find_vendor│
+│   (ONNX Runtime Web, WASM/WebGPU)                │      │  find_datetime, find_total,   │
+│ frozen picture with the found text outlined      │◄─────┤  find_item_count, find_items, │
+│                                                  │ ids  │  merge_items, summarize       │
+└──────────────────────────────────────────────────┘      └───────────────────────────────┘
 ```
 
 * **OCR:** PaddleOCR PP-OCRv5 mobile models in ONNX form. The detector is DBNet; it finds the text
   lines as rotated boxes, so a tilted receipt still reads. The recognizer is SVTR with CTC
   decoding; it gives per-character confidence and word positions.
-* **No duplicates:** each OCR frame is placed on one receipt coordinate system. That uses the
-  camera-motion estimate plus anchor lines whose text matches lines already read. Lines seen
-  before get another vote and new lines are appended. Two genuinely identical items, such as two
-  `BANANAS` lines, sit at different places on the receipt, so both are kept.
-* **Speed:** lines already confirmed are not re-read every frame. The page is cross-origin
-  isolated (`serve.py` adds COOP/COEP headers), so ONNX Runtime can use several CPU cores.
+* **Finding fields:** the text is grouped into printed rows (undoing any tilt). Each step has a
+  finder. The store name is the biggest line of words, ranked ahead of addresses and phone
+  numbers. Date and time come from patterns. The total is the row saying TOTAL, not SUBTOTAL; if
+  no row says it, every amount is offered. The item count comes from text like `ITEMS SOLD: 15`.
+  Items are rows with a price, including `qty @ price` lines.
+* **Overlapping item pictures:** the longest run of items at the end of the list that repeats at
+  the start of a new picture is skipped. Two genuinely identical items in different places on the
+  receipt, such as two `BANANAS` lines, are both kept.
 
 ### Performance to expect
 
-Measured on this PC in headless Chromium (WASM, 4 threads):
+Measured on this PC in headless Chromium, for a picture with about 50 lines of text:
 
-* Detection takes about 300 ms per frame.
-* Recognition takes about 600 ms for a fresh view, dropping to about 250 ms once most visible
-  lines are known.
-* That works out to **1–2 scans per second**. The video and the boxes still move at full frame
-  rate between scans.
+* About **3 s** per picture with `serve.py` locally (multi-threaded).
+* About **4.5 s** per picture the way Streamlit Cloud runs it (single core).
 
-Phones vary a lot. Expect roughly half that speed on a mid-range Android phone, and similar or
-better on a recent iPhone or flagship. If scanning feels slow, try lowering *Detection
-resolution* to 736, or try the WebGPU backend.
+Phones are slower; expect several seconds per picture. Pictures of a small area (just the total,
+just the store name) read faster than the whole receipt. If it feels slow, lower *Detection
+resolution* to 960 or try the WebGPU backend.
 
 ## Project layout
 
 | Path | |
 |---|---|
 | `serve.py` | ASGI entry (Streamlit `st.App`) that adds the isolation headers |
-| `app.py` | the Streamlit page: settings, results, export |
-| `receipt_parser.py` | text rows → vendor/date/time/items/total and the validation checks |
+| `app.py` | the Streamlit page: the scan steps, the summary, export |
+| `receipt_parser.py` | the finders for each step, item merging and the validation checks |
 | `scanner/` | the camera component (`frontend/` is plain JS, no build step) |
 | `scanner/assets.py` | downloads the models and onnxruntime-web on first start, with checksums |
 
@@ -109,19 +110,19 @@ resolution* to 736, or try the WebGPU backend.
 
 ```powershell
 .venv\Scripts\python -m pip install -r requirements-dev.txt
-.venv\Scripts\python tests\make_receipt.py --video     # synthetic receipt images and camera-pan videos
-.venv\Scripts\python -m pytest tests                    # parser
+.venv\Scripts\python tests\make_receipt.py --video     # synthetic receipt images and fake camera feeds
+.venv\Scripts\python -m pytest tests                    # parser and step finders
 
 cd tests\js
 npm install
-npm test                                                 # OCR core, motion, tracker (real models, Node)
+npm test                                                 # OCR core with the real models (Node)
 npx playwright install chromium
-npm run e2e                                              # whole app with a fake camera (app must be running)
+npm run e2e                                              # whole guided scan with a fake camera (app must be running)
 ```
 
-The tracker tests pan a virtual camera over the receipt, including a tilted receipt, zoom drift,
-fast scans, jumps and scanning back and forth. They check that every printed row comes out exactly
-once and that every green word is correct.
+The end-to-end test takes a picture at every step and confirms what was found. It adds the items
+twice from completely overlapping pictures, checking that nothing is added twice, and then checks
+the summary. It runs for a correct receipt, one whose total doesn't match, and a tilted receipt.
 
 ## Notes and limits
 
@@ -131,5 +132,3 @@ once and that every green word is correct.
   `receipt_parser.py`.
 * When running locally, restart `streamlit run serve.py` after editing `receipt_parser.py`. In ASGI mode, Streamlit only reloads
   `app.py` by itself.
-* For debugging, the overlay's top-right readout shows the backend, scans per second, milliseconds
-  for detection + recognition, and boxes read / skipped.

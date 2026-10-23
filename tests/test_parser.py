@@ -152,3 +152,90 @@ def test_tilted_receipt_rows_are_deskewed(degrees):
     assert r["total"] == 41.51
     assert len(r["items"]) == 10
     assert r["validation"]["status"] == "ok", r["validation"]["message"]
+
+
+# --- guided scan: one photo per step -------------------------------------------------------------
+from receipt_parser import find_datetime, find_item_count, find_items, find_total, find_vendor, merge_items, summarize
+
+
+def photo(*texts):
+    """The OCR segments of a photo showing only the given printed rows (texts must be unique)."""
+    return [l for l in lines_from(OCR_SEGMENTS) if l["text"] in texts]
+
+
+def photo_of(start, stop):
+    """The OCR segments of a photo showing OCR_SEGMENTS[start:stop] (keeps repeated rows apart)."""
+    return lines_from(OCR_SEGMENTS)[start:stop]
+
+
+def test_find_vendor_prefers_big_name_over_address():
+    lines = photo("FRESH MART", "123 MAIN STREET", "SPRINGFIELD TEL 555-0142")
+    cands = find_vendor(lines)
+    assert cands[0]["value"] == "FRESH MART"
+    assert cands[0]["ids"] == ["L0"]
+    assert {c["value"] for c in cands[1:]} == {"123 MAIN STREET", "SPRINGFIELD TEL 555-0142"}
+
+
+def test_find_vendor_nothing_readable():
+    assert find_vendor(photo("41.51", "TIME: 14:35")) == []
+
+
+def test_find_datetime():
+    found = find_datetime(photo("DATE: 10/21/2026", "TIME: 14:35", "4011 BANANAS"))
+    assert [c["value"] for c in found["date"]] == ["10/21/2026"]
+    assert [c["value"] for c in found["time"]] == ["14:35"]
+    assert found["date"][0]["ids"] == ["L3"] and found["time"][0]["ids"] == ["L4"]
+
+
+def test_find_total_with_subtotal_and_tax():
+    found = find_total(photo("SUBTOTAL", "39.53", "TAX 5%", "1.98", "TOTAL", "41.51", "VISA"))
+    assert found["total"][0]["value"] == 41.51
+    assert set(found["total"][0]["ids"]) == {"L33", "L34"}
+    assert found["subtotal"] == 39.53 and found["tax"] == 1.98
+
+
+def test_find_total_without_keyword_offers_amounts():
+    found = find_total(photo("2.15", "9.99"))
+    assert [c["value"] for c in found["total"]] == [9.99, 2.15]
+
+
+def test_find_item_count():
+    assert [c["value"] for c in find_item_count(photo("ITEMS SOLD: 15", "THANK YOU FOR SHOPPING"))] == [15]
+    assert find_item_count(photo("TOTAL", "41.51")) == []
+
+
+def test_items_from_overlapping_photos_are_merged_once():
+    first = find_items(photo_of(5, 17))["items"]    # 4011 BANANAS .. 9921 EGGS 4.29 (both bananas)
+    second = find_items(photo_of(12, 29))["items"]  # 2nd BANANAS .. COFFEE BEANS: repeats 2 items
+    assert [i["name"] for i in first] == ["BANANAS", "WHOLE MILK 1GAL", "BREAD WHEAT", "BANANAS", "EGGS LARGE 12CT"]
+    merged, skipped = merge_items(first, second)
+    assert skipped == 2
+    assert len(merged) == 10
+    assert [i["name"] for i in merged].count("BANANAS") == 2  # the two real banana lines both stay
+
+
+def test_merge_without_overlap_keeps_everything():
+    a = [{"name": "MILK", "total": 3.49}]
+    b = [{"name": "BREAD", "total": 2.99}]
+    assert merge_items(a, b) == (a + b, 0)
+
+
+def test_summarize_checks_items_against_total():
+    items = find_items(photo_of(5, 29))["items"]
+    fields = {"vendor": "FRESH MART", "date": "10/21/2026", "time": "14:35", "total": 41.51,
+              "subtotal": 39.53, "tax": 1.98, "item_count": 15}
+    assert summarize(fields, items)["status"] == "ok"
+    assert summarize({**fields, "total": 45.51}, items)["status"] == "mismatch"
+    assert summarize({**fields, "tax": None, "subtotal": None}, items)["status"] == "mismatch"
+
+
+def test_low_confidence_slivers_are_ignored():
+    """Thin pieces of big bold letters come back as '2' with low confidence (seen on a real run)."""
+    lines = [
+        {"id": "a", "text": "FRESH", "conf": 1.0, "ok": True, "box": [240, 132, 341, 163]},
+        {"id": "b", "text": "2", "conf": 0.255, "ok": False, "box": [334, 137, 345, 151]},
+        {"id": "c", "text": "2", "conf": 0.264, "ok": False, "box": [340, 137, 351, 151]},
+        {"id": "d", "text": "MART", "conf": 1.0, "ok": True, "box": [340, 125, 423, 156]},
+        {"id": "e", "text": "123 MAIN STREET", "conf": 0.99, "ok": True, "box": [260, 171, 411, 196]},
+    ]
+    assert find_vendor(lines)[0]["value"] == "FRESH MART"

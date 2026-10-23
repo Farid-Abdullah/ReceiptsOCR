@@ -1,5 +1,4 @@
-"""Render a synthetic thermal-style receipt (PNG) and a camera-pan video (MJPEG) for testing."""
-import random
+"""Render a synthetic thermal-style receipt (PNG) and fake camera feeds (MJPEG) for testing."""
 import sys
 from pathlib import Path
 
@@ -68,23 +67,16 @@ def render(lines, width=560):
     return img.filter(ImageFilter.GaussianBlur(0.6))
 
 
-def pan_video(receipt, path, frame_w=1280, frame_h=720, fps=30, seconds=14):
-    """Receipt on a dark table; camera slides top to bottom with a little jitter."""
-    scale = 1.55
+def still_video(receipt, path, frame_w=720, frame_h=1280, frames=30):
+    """A phone held still over the receipt (portrait): the whole receipt on a dark table, a little noise."""
+    # generous margins: Chrome's fake camera crops the frame's edges to fit the requested aspect
+    scale = min((frame_w - 60) / receipt.width, (frame_h * 0.72) / receipt.height)
     r = receipt.resize((int(receipt.width * scale), int(receipt.height * scale)), Image.BICUBIC)
-    table = Image.new("RGB", (frame_w * 2, r.height + frame_h * 2), (70, 58, 50))
-    ox = (table.width - r.width) // 2
-    table.paste(r, (ox, frame_h // 2))
-    n = fps * seconds
-    rng = random.Random(3)
-    y_start, y_end = frame_h // 2 - 120, frame_h // 2 + r.height - frame_h + 120
+    frame = Image.new("RGB", (frame_w, frame_h), (70, 58, 50))
+    frame.paste(r, ((frame_w - r.width) // 2, (frame_h - r.height) // 2))
     with open(path, "wb") as fh:
-        for i in range(n):
-            t = min(1.0, i / (n * 0.85))
-            y = int(y_start + (y_end - y_start) * t) + rng.randint(-3, 3)
-            x = ox + r.width // 2 - frame_w // 2 + rng.randint(-4, 4)
-            frame = table.crop((x, y, x + frame_w, y + frame_h))
-            frame.save(fh, "JPEG", quality=88)
+        for _ in range(frames):
+            frame.save(fh, "JPEG", quality=90)
 
 
 if __name__ == "__main__":
@@ -95,10 +87,10 @@ if __name__ == "__main__":
     for angle in (4, -6):  # tilted copies for the OCR tests
         img.rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor=(70, 58, 50)).save(OUT / f"receipt_rot{angle}.png")
     print(f"subtotal={sub} tax={tax} total={total}")
-    if "--video" in sys.argv:  # camera pans for the end-to-end test (tests/js/e2e.js)
-        pan_video(img, OUT / "receipt_pan_slow.mjpeg", seconds=40)
+    if "--video" in sys.argv:  # fake camera feeds for the end-to-end test (tests/js/e2e.js)
+        still_video(img, OUT / "receipt_still.mjpeg")
         bad, *_ = receipt_lines(total_override=45.51)
-        pan_video(render(bad), OUT / "receipt_pan_slow_bad.mjpeg", seconds=40)
-        tilted = img.rotate(4, resample=Image.BICUBIC, expand=True, fillcolor=(70, 58, 50))
-        pan_video(tilted, OUT / "receipt_pan_tilted.mjpeg", seconds=40)
+        still_video(render(bad), OUT / "receipt_still_bad.mjpeg")
+        still_video(img.rotate(4, resample=Image.BICUBIC, expand=True, fillcolor=(70, 58, 50)),
+                    OUT / "receipt_still_tilted.mjpeg")
         print("videos written")

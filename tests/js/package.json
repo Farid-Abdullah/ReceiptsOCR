@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "e2e": "node e2e.js ../data/receipt_pan_slow.mjpeg 40 41.51 ok && node e2e.js ../data/receipt_pan_slow_bad.mjpeg 40 45.51 mismatch && node e2e.js ../data/receipt_pan_tilted.mjpeg 40 41.51 ok"
+    "e2e": "node e2e.js ../data/receipt_still.mjpeg 41.51 ok && node e2e.js ../data/receipt_still_bad.mjpeg 45.51 mismatch && node e2e.js ../data/receipt_still_tilted.mjpeg 41.51 ok"
   },
   "devDependencies": {
     "onnxruntime-node": "1.22.0",

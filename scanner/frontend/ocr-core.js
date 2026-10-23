@@ -239,30 +239,6 @@
     boxes = boxes.filter((b) => b.rot.len >= 0.6 * b.rot.thick && b.rot.thick >= 6);
     const t1 = now();
 
-    // Boxes that land on text already confirmed in earlier frames do not need reading again,
-    // except a few long ones kept as registration anchors.
-    const skipped = [];
-    if (opts.hints && opts.hints.length) {
-      const matched = [];
-      const rest = [];
-      for (const b of boxes) {
-        // same box, or a piece of a confirmed line (the detector splits lines differently per frame)
-        const h = opts.hints.find((hint) => {
-          const c = covers(b, hint.box);
-          return c.ofBox >= 0.8 && c.ofHint >= 0.25;
-        });
-        if (h) matched.push({ b, id: h.id });
-        else rest.push(b);
-      }
-      matched.sort((p, q) => (q.b.x1 - q.b.x0) - (p.b.x1 - p.b.x0));
-      const keep = opts.anchors ?? 3;
-      for (let i = 0; i < matched.length; i++) {
-        if (i < keep) rest.push(matched[i].b);
-        else skipped.push({ box: [matched[i].b.x0, matched[i].b.y0, matched[i].b.x1, matched[i].b.y1], skip: matched[i].id });
-      }
-      boxes = rest;
-    }
-
     const aspect = (b) => b.rot.len / b.rot.thick;
     const order = boxes.map((b, i) => i).sort((a, b) => aspect(boxes[a]) - aspect(boxes[b]));
     const batchSize = opts.recBatch ?? 6;
@@ -284,18 +260,10 @@
       });
     }
     return {
-      lines: lines.filter((l) => l && l.text.length > 0).concat(skipped),
-      timing: { det: t1 - t0, rec: now() - t1, total: now() - t0, read: boxes.length, skipped: skipped.length },
+      lines: lines.filter((l) => l && l.text.length > 0),
+      timing: { det: t1 - t0, rec: now() - t1, total: now() - t0 },
       detSize: [det.w, det.h],
     };
-  }
-
-  function covers(b, h) {
-    const ix = Math.min(b.x1, h[2]) - Math.max(b.x0, h[0]);
-    const iy = Math.min(b.y1, h[3]) - Math.max(b.y0, h[1]);
-    if (ix <= 0 || iy <= 0) return { ofBox: 0, ofHint: 0 };
-    const inter = ix * iy;
-    return { ofBox: inter / ((b.x1 - b.x0) * (b.y1 - b.y0)), ofHint: inter / ((h[2] - h[0]) * (h[3] - h[1])) };
   }
 
   function now() {
