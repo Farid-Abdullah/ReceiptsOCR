@@ -29,10 +29,11 @@ const mainText = (page) =>
   page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
 
   await page.goto(process.env.APP_URL || "http://localhost:8501/", { waitUntil: "domcontentloaded" });
-  const frameEl = await page.waitForSelector("iframe[title*='receipt_scanner']", { timeout: 30000 });
+  // generous: a fresh server downloads the OCR models on the first visit
+  const frameEl = await page.waitForSelector("iframe[title*='receipt_scanner']", { timeout: 240000 });
   const frame = await frameEl.contentFrame();
   await frame.waitForFunction(() => document.getElementById("status").textContent.startsWith("Ready"), null, { timeout: 60000 });
-  console.log("isolated:", await page.evaluate(() => self.crossOriginIsolated), "/ iframe:", await frame.evaluate(() => self.crossOriginIsolated));
+  console.log("isolated:", await page.evaluate(() => self.crossOriginIsolated), "/ iframe:", await frame.evaluate(() => self.crossOriginIsolated), "/ code version:", await frame.evaluate(() => window.SCANNER_VERSION));
 
   const t0 = Date.now();
   await frame.click("#start-big");

@@ -3,12 +3,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# downloaded by scripts/setup_assets.py
+# downloaded by scanner/assets.py, and the code fingerprint written by scanner/__init__.py
 scanner/frontend/models/
 scanner/frontend/vendor/
+scanner/frontend/build.json
 
-# test tooling and generated test data (python tests/make_receipt.py --video); Hugging Face
-# also rejects binary files such as PNGs in git history
+# test tooling and generated test data (python tests/make_receipt.py --video)
 tests/js/node_modules/
 tests/data/*.mjpeg
 tests/data/*.png

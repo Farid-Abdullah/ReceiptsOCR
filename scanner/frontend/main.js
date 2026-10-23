@@ -68,7 +68,7 @@
     busy = false;
     pending = null;
     workerBackend = settings.backend;
-    worker = new Worker("worker.js?v=14");
+    worker = new Worker(`worker.js?v=${encodeURIComponent(window.SCANNER_VERSION || "")}`);
     worker.onmessage = onWorkerMessage;
     worker.onerror = (e) => setStatus(`OCR worker failed: ${e.message || e}`);
     worker.postMessage({ type: "init", backend: settings.backend });

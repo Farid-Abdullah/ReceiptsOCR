@@ -1,6 +1,8 @@
 // OCR worker: owns the ONNX sessions so inference never blocks the camera/overlay thread.
 /* global ort, OCRCore */
-importScripts("vendor/ort/ort.min.js?v=14", "ocr-core.js?v=14");
+// same code fingerprint as the page (see index.html), so a redeploy never mixes old and new code
+const VERSION = new URLSearchParams(self.location.search).get("v") || "";
+importScripts(`vendor/ort/ort.min.js?v=${VERSION}`, `ocr-core.js?v=${VERSION}`);
 
 let sessions = null;
 let chars = null;

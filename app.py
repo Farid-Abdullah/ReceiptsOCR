@@ -1,6 +1,6 @@
 """Receipt scanner: point the phone camera at a receipt and slide down it.
 
-Start with:  streamlit run serve.py   (deployed on Hugging Face Spaces, see README)
+Locally:  streamlit run serve.py      Streamlit Community Cloud: main file app.py (see README)
 """
 import json
 
@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from receipt_parser import parse
-from scanner import assets_present, receipt_scanner
+from scanner import assets_present, ensure_assets, receipt_scanner
 
 st.set_page_config(page_title="Receipt Scanner", page_icon="🧾", layout="centered", initial_sidebar_state="collapsed")
 st.markdown(
@@ -22,9 +22,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# The OCR models are not in git: the first visit to a fresh server downloads them (~45 MB, once).
 if not assets_present():
-    st.error("OCR models are missing. Run `python scripts/setup_assets.py` first.")
-    st.stop()
+    try:
+        with st.spinner("Downloading the OCR models (first start only, takes a minute)..."):
+            ensure_assets()
+    except Exception as err:  # noqa: BLE001 - show any download problem in the page
+        st.error(f"Could not download the OCR models: {err}. Reload the page to try again.")
+        st.stop()
 
 with st.sidebar:
     st.header("Scanner settings")

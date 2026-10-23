@@ -1,14 +1,3 @@
----
-title: Receipts OCR
-emoji: 🧾
-colorFrom: green
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: Live camera receipt scanner with in-browser OCR
----
-
 # Receipt scanner
 
 A Streamlit app for your phone: point the camera at a receipt and slide slowly from top to bottom.
@@ -21,41 +10,36 @@ products section turns **orange** on the camera view.
 All OCR runs **in the phone's browser**. Python only receives the de-duplicated text and does the
 receipt parsing and validation. Receipt images never leave the phone.
 
-## Deploy (Hugging Face Spaces)
+## Deploy (Streamlit Community Cloud)
 
-The app runs as a Docker Space (`Dockerfile`; the Space settings are the header at the top of this
-file). The GitHub Action `.github/workflows/sync-to-hf.yml` copies the `main` branch to the Space
-on every push or merge, and the Space then rebuilds itself. Other branches are never deployed.
+The app is deployed from the `main` branch of the GitHub repo. Every push or merge to `main`
+redeploys it automatically; other branches are never deployed.
 
-One-time setup:
+One-time setup on [share.streamlit.io](https://share.streamlit.io):
 
-1. On Hugging Face, create a Space: SDK **Docker**, template **Blank**, hardware **CPU basic**.
-2. Create a Hugging Face access token of type **Write**.
-3. In the GitHub repo, open **Settings → Secrets and variables → Actions** and add:
-   * secret `HF_TOKEN`: the token
-   * variable `HF_USERNAME`: your Hugging Face username
-   * variable `HF_SPACE`: `your-username/space-name`
-4. Push to `main`, or use **Actions → Deploy to Hugging Face → Run workflow**.
+1. Sign in with GitHub and choose **Create app → Deploy a public app from GitHub**.
+2. Repository `Farid-Abdullah/ReceiptsOCR`, branch `main`, main file `app.py`.
+3. Under **Advanced settings**, choose Python **3.13** (3.11 or newer is required).
+4. Pick the app address (`something.streamlit.app`) and click **Deploy**.
 
-Open the app on the phone at its direct address, `https://<username>-<space-name>.hf.space`. You
-can copy it from the Space's **⋮ → Embed this Space** menu. Don't use the `huggingface.co/spaces/...`
-page: it shows the app inside a frame, where the camera may be blocked and multi-threading is off.
-
-Phones only allow the camera on `https://` pages. Hugging Face provides the HTTPS, so no
-certificates are involved.
+The first start downloads the OCR models (about 45 MB) into the app, which takes a minute.
+Streamlit Cloud provides the HTTPS that phones need for the camera.
 
 ## Run it on your PC (development)
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python scripts\setup_assets.py
 .venv\Scripts\python -m streamlit run serve.py
 ```
 
-`setup_assets.py` downloads the OCR models (about 12 MB) and the browser runtime once. Open
-`http://localhost:8501` in a desktop browser with a webcam. Browsers treat `localhost` as secure,
-so the camera works without HTTPS there. To try a change on the phone, deploy it.
+Open `http://localhost:8501` in a desktop browser with a webcam. Browsers treat `localhost` as
+secure, so the camera works without HTTPS there. The first start downloads the OCR models. To try
+a change on the phone, deploy it.
+
+`serve.py` runs the same `app.py` but adds cross-origin isolation headers, which let the OCR use
+several CPU cores. Streamlit Cloud shows apps inside its own page, where that isolation isn't
+possible, so the deployed app runs the OCR on one core. That's slower, but it works.
 
 ## Using it
 
@@ -116,11 +100,10 @@ resolution* to 736, or try the WebGPU backend.
 | Path | |
 |---|---|
 | `serve.py` | ASGI entry (Streamlit `st.App`) that adds the isolation headers |
-| `Dockerfile`, `.github/workflows/` | Hugging Face Space build and deployment |
 | `app.py` | the Streamlit page: settings, results, export |
 | `receipt_parser.py` | text rows → vendor/date/time/items/total and the validation checks |
 | `scanner/` | the camera component (`frontend/` is plain JS, no build step) |
-| `scripts/setup_assets.py` | downloads the models and onnxruntime-web, with checksums |
+| `scanner/assets.py` | downloads the models and onnxruntime-web on first start, with checksums |
 
 ## Tests
 

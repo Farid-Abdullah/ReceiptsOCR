@@ -46,8 +46,25 @@
   </div>
   <div id="legend"><span class="g">confirmed</span><span class="r">uncertain</span><span class="o">items don't add up</span></div>
   </div>
-  <script src="tracker.js?v=14"></script>
-  <script src="motion.js?v=14"></script>
-  <script src="main.js?v=14"></script>
+  <script>
+    // Load the app scripts tagged with the code fingerprint from build.json (written by the Python
+    // side), so phones fetch new code after a redeploy instead of a cached copy.
+    (async () => {
+      let v = String(Date.now());
+      try {
+        v = (await (await fetch("build.json", { cache: "no-store" })).json()).v || v;
+      } catch (_) { /* no fingerprint: the timestamp still avoids stale code */ }
+      window.SCANNER_VERSION = v;
+      for (const src of ["tracker.js", "motion.js", "main.js"]) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = `${src}?v=${v}`;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      }
+    })();
+  </script>
 </body>
 </html>
